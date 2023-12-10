@@ -48,12 +48,14 @@ class AcousticUnitsDataset(Dataset):
     def __getitem__(self, index):
         wav_path = self.metadata[index]
         units_path = self.units_dir / wav_path.relative_to(self.wavs_dir)
+        label_path = self.labels_dir / wav_path.relative_to(self.wavs_dir)
 
         wav, _ = torchaudio.load(wav_path)
         wav = F.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
         codes = np.load(units_path.with_suffix(".npy"))
+        labels = np.load(label_path.with_suffix(".npy"))
 
-        return wav, torch.from_numpy(codes).long()
+        return wav, torch.from_numpy(codes).long(), labels
 
     def collate(self, batch):
         wavs, codes = zip(*batch)
