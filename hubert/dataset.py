@@ -55,7 +55,7 @@ class AcousticUnitsDataset(Dataset):
         codes = np.load(units_path.with_suffix(".npy"))
         labels = np.load(label_path.with_suffix(".npy"))
 
-        return wav, torch.from_numpy(codes).long(), labels
+        return wav, torch.from_numpy(codes).long(), torch.from_numpy(labels).float()
 
     def collate(self, batch):
         wavs, codes = zip(*batch)
