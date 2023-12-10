@@ -11,6 +11,14 @@ import torch.nn.functional as F
 
 class Hubert(nn.Module):
     def __init__(self, num_label_embeddings: int = 100, mask: bool = True):
+        """
+        Initializes the Hubert model.
+
+        Args:
+            num_label_embeddings (int): The number of label embeddings.
+            mask (bool): Whether to apply masking during training.
+
+        """
         super().__init__()
         self._mask = mask
         self.feature_extractor = FeatureExtractor()
@@ -30,6 +38,16 @@ class Hubert(nn.Module):
         self.label_embedding = nn.Embedding(num_label_embeddings, 256)
 
     def mask(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Applies masking to the input tensor.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the masked tensor and the mask.
+
+        """
         mask = None
         if self.training and self._mask:
             mask = _compute_mask((x.size(0), x.size(1)), 0.8, 10, x.device, 2)
@@ -39,6 +57,17 @@ class Hubert(nn.Module):
     def encode(
         self, x: torch.Tensor, layer: Optional[int] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Encodes the input tensor using the Hubert model.
+
+        Args:
+            x (torch.Tensor): The input tensor of shape (batch_size, sequence_length, feature_dim).
+            layer (Optional[int]): The layer index to output from the encoder. Defaults to None.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: A tuple containing the encoded tensor and the mask tensor.
+        """
+        
         x = self.feature_extractor(x)
         x = self.feature_projection(x.transpose(1, 2))
         x, mask = self.mask(x)
@@ -48,6 +77,15 @@ class Hubert(nn.Module):
         return x, mask
 
     def logits(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the logits for the given input tensor.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The logits tensor.
+        """
         logits = torch.cosine_similarity(
             x.unsqueeze(2),
             self.label_embedding.weight.unsqueeze(0).unsqueeze(0),
@@ -107,25 +145,18 @@ class HubertDiscrete(Hubert):
 
 
 class FeatureExtractor(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_units: int = 512, kernel_sizes: list[int] = [3, 3, 3, 3, 2, 2]):
         super().__init__()
         self.conv0 = nn.Conv1d(1, 512, 10, 5, bias=False)
         self.norm0 = nn.GroupNorm(512, 512)
-        self.conv1 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv2 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv3 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv4 = nn.Conv1d(512, 512, 3, 2, bias=False)
-        self.conv5 = nn.Conv1d(512, 512, 2, 2, bias=False)
-        self.conv6 = nn.Conv1d(512, 512, 2, 2, bias=False)
+        self.convs = nn.ModuleList([
+            nn.Conv1d(hidden_units, hidden_units, kernel_size, bias=False) for kernel_size in kernel_sizes
+            ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.gelu(self.norm0(self.conv0(x)))
-        x = F.gelu(self.conv1(x))
-        x = F.gelu(self.conv2(x))
-        x = F.gelu(self.conv3(x))
-        x = F.gelu(self.conv4(x))
-        x = F.gelu(self.conv5(x))
-        x = F.gelu(self.conv6(x))
+        for conv in self.convs:
+            x = F.gelu(conv(x))
         return x
 
 
