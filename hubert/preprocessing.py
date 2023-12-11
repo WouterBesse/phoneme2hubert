@@ -1,5 +1,4 @@
 import pyworld as pw
-import soundfile as sf
 from pathlib import Path
 import numpy as np
 import torchaudio
@@ -22,7 +21,7 @@ def stretch_f0(f0: list, t: list, sample_rate: int):
 
     return new_f0
 
-def get_f0(wav: sf.SoundFile, sample_rate: int):
+def get_f0(wav, sample_rate: int):
     _f0, t = pw.dio(wav, sample_rate)    # raw pitch extractor
     f0 = pw.stonemask(wav, _f0, t, sample_rate)  # pitch refinement
     return f0
