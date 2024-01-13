@@ -39,7 +39,7 @@ class AcousticUnitsDataset(Dataset):
         self.metadata = [
             path for path, key in metadata if len(np.load(path)) > min_samples
         ]
-        print(self.metadata)
+        # print(self.metadata)
 
         self.sample_rate = sample_rate
         self.min_samples = min_samples

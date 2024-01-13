@@ -41,12 +41,12 @@ INIT_METHOD = "tcp://localhost:54321"
 
 
 def train(rank, world_size, args):
-    # dist.init_process_group(
-    #     BACKEND,
-    #     rank=rank,
-    #     world_size=world_size,
-    #     init_method=INIT_METHOD,
-    # )
+    dist.init_process_group(
+        BACKEND,
+        rank=rank,
+        world_size=world_size,
+        init_method=INIT_METHOD,
+    )
 
     ####################################################################################
     # Setup logging utilities:
@@ -88,8 +88,10 @@ def train(rank, world_size, args):
 
         hubert.load_state_dict(checkpoint["hubert"], strict=False)
 
-    # hubert = DDP(hubert, device_ids=[rank])
-    hubert = hubert.cuda()
+    hubert = DDP(hubert, device_ids=[rank])
+    # hubert = hubert.to(rank)
+    # Print amount of vram that's used in GB:
+    print("Memory used after model initialisation: ", torch.cuda.memory_allocated() / 1e9)
 
     ####################################################################################
     # Initialze optimizer and grad scaler
@@ -112,16 +114,16 @@ def train(rank, world_size, args):
         root=args.dataset_dir,
         train=True,
     )
-    # train_sampler = DistributedSampler(train_dataset, drop_last=True)
+    train_sampler = DistributedSampler(train_dataset, drop_last=True)
     train_loader = DataLoader(
         train_dataset,
         collate_fn=train_dataset.collate,
         batch_size=BATCH_SIZE,
-        # sampler=train_sampler,
+        sampler=train_sampler,
         num_workers=8,
         pin_memory=True,
         shuffle=False,
-        # drop_last=True,
+        drop_last=True,
     )
 
     validation_dataset = AcousticUnitsDataset(
@@ -218,6 +220,7 @@ def train(rank, world_size, args):
 
             with amp.autocast():
                 logits, mask = hubert(wavs)
+                # print("Memory used first iteration: ", torch.cuda.memory_allocated() / 1e9)
                 length = min(
                     mask.size(-1) if args.mask else float("inf"), codes.size(-1)
                 )
@@ -452,10 +455,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     world_size = torch.cuda.device_count()
-    train(0, world_size, args)
-    # mp.spawn(
-    #     train,
-    #     args=(world_size, args),
-    #     nprocs=world_size,
-    #     join=True,
-    # )
+    # train('cpu', world_size, args)
+    mp.spawn(
+        train,
+        args=(world_size, args),
+        nprocs=world_size,
+        join=True,
+    )
