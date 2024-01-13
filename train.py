@@ -11,11 +11,11 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
-import torch.multiprocessing as mp
+# import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
-from hubert.model import Hubert, URLS
+from hubert.model import Hubert #, URLS
 from hubert.dataset import AcousticUnitsDataset
 from hubert.utils import Metric, save_checkpoint, load_checkpoint
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Define hyperparameters for training:
 ########################################################################################
 
-BATCH_SIZE = 32
+BATCH_SIZE = 1
 LEARNING_RATE = 2e-5
 BETAS = (0.9, 0.98)
 EPS = 1e-06
@@ -41,12 +41,12 @@ INIT_METHOD = "tcp://localhost:54321"
 
 
 def train(rank, world_size, args):
-    dist.init_process_group(
-        BACKEND,
-        rank=rank,
-        world_size=world_size,
-        init_method=INIT_METHOD,
-    )
+    # dist.init_process_group(
+    #     BACKEND,
+    #     rank=rank,
+    #     world_size=world_size,
+    #     init_method=INIT_METHOD,
+    # )
 
     ####################################################################################
     # Setup logging utilities:
@@ -88,7 +88,8 @@ def train(rank, world_size, args):
 
         hubert.load_state_dict(checkpoint["hubert"], strict=False)
 
-    hubert = DDP(hubert, device_ids=[rank])
+    # hubert = DDP(hubert, device_ids=[rank])
+    hubert = hubert.cuda()
 
     ####################################################################################
     # Initialze optimizer and grad scaler
@@ -111,16 +112,16 @@ def train(rank, world_size, args):
         root=args.dataset_dir,
         train=True,
     )
-    train_sampler = DistributedSampler(train_dataset, drop_last=True)
+    # train_sampler = DistributedSampler(train_dataset, drop_last=True)
     train_loader = DataLoader(
         train_dataset,
         collate_fn=train_dataset.collate,
         batch_size=BATCH_SIZE,
-        sampler=train_sampler,
+        # sampler=train_sampler,
         num_workers=8,
         pin_memory=True,
         shuffle=False,
-        drop_last=True,
+        # drop_last=True,
     )
 
     validation_dataset = AcousticUnitsDataset(
@@ -193,7 +194,7 @@ def train(rank, world_size, args):
     validation_accuracy = Metric()
 
     for epoch in range(start_epoch, n_epochs + 1):
-        train_sampler.set_epoch(epoch)
+        # train_sampler.set_epoch(epoch)
 
         hubert.train()
         if args.mask:
@@ -451,9 +452,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     world_size = torch.cuda.device_count()
-    mp.spawn(
-        train,
-        args=(world_size, args),
-        nprocs=world_size,
-        join=True,
-    )
+    train(0, world_size, args)
+    # mp.spawn(
+    #     train,
+    #     args=(world_size, args),
+    #     nprocs=world_size,
+    #     join=True,
+    # )

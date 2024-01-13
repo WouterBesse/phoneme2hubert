@@ -133,3 +133,4 @@ dmypy.json
 
 # Datafolder
 data/
+chkpt/

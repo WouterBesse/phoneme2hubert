@@ -14,6 +14,7 @@ class AcousticUnitsDataset(Dataset):
         self,
         root: Path,
         sample_rate: int = 16000,
+        label_rate: int = 50,
         min_samples: int = 32000,
         max_samples: int = 250000,
         train: bool = True,
@@ -22,11 +23,13 @@ class AcousticUnitsDataset(Dataset):
         self.units_dir = root / "discrete"
         self.f0_dir = root / "f0"
         self.phon_dir = root / "phon"
+        self.label_rate = label_rate
 
         # with open(root / "lengths.json") as file:
         #     self.lenghts = json.load(file)
 
-        # pattern = "train-*/**/*.wav" if train else "dev-*/**/*.wav"
+        pattern = "train/**/*.npy" if train else "dev/**/*.npy"
+
         pattern = "*.npy"
         metadata = (
             (path, path.relative_to(self.phon_dir).with_suffix("").as_posix())
@@ -47,42 +50,42 @@ class AcousticUnitsDataset(Dataset):
         return len(self.metadata)
 
     def __getitem__(self, index):
-        print("Test")
+        # print("Test")
         f0_path = self.metadata[index]
-        wav_path = self.wavs_dir / f0_path.relative_to(self.phon_dir)
+        # wav_path = self.wavs_dir / f0_path.relative_to(self.phon_dir)
         units_path = self.units_dir / f0_path.relative_to(self.phon_dir)
         phon_path = self.phon_dir / f0_path.relative_to(self.phon_dir)
         
-        print(wav_path.with_suffix(".wav"))
-        wav, _ = torchaudio.load(wav_path.with_suffix(".wav"))
-        print(wav)
+        # print(wav_path.with_suffix(".wav"))
+        # wav, _ = torchaudio.load(wav_path.with_suffix(".wav"))
+        # print(wav)
         codes = np.load(units_path)
         phon = torch.from_numpy(np.array(np.load(phon_path)))
         f0 = torch.from_numpy(np.array(np.load(f0_path))).float()
 
-        wav = F.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
+        # wav = F.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
         phon = F.pad(phon, ((400 - 320) // 2, (400 - 320) // 2))
         f0 = F.pad(f0, ((400 - 320) // 2, (400 - 320) // 2))
 
-        return wav, torch.from_numpy(codes).long(), phon, f0
+        return torch.from_numpy(codes).long(), phon.unsqueeze(0), f0.unsqueeze(0)
 
     def collate(self, batch):
-        wavs, codes, phons, f0 = zip(*batch)
-        wavs, codes, phons, f0 = list(wavs), list(codes), list(phons), list(f0)
+        codes, phons, f0 = zip(*batch)
+        codes, phons, f0 = list(codes), list(phons), list(f0)
 
-        wav_lengths = [wav.size(-1) for wav in wavs]
+        # wav_lengths = [wav.size(-1) for wav in wavs]
         code_lengths = [code.size(-1) for code in codes]
         phons_lengths = [phon.size(-1) for phon in phons]
         f0_lengths = [f.size(-1) for f in f0]
 
         phon_frames, phon_col, phon_off = self.modify_offsets(phons, phons_lengths)
         f0_frames, f0_col, f0_off = self.modify_offsets(f0, f0_lengths)
-        wav_frames, wav_col, wav_off = self.modify_offsets(wavs, wav_lengths)
+        # wav_frames, wav_col, wav_off = self.modify_offsets(wavs, wav_lengths)
 
         rate = self.label_rate / self.sample_rate
 
-        code_offsets = [round(wav_offset * rate) for wav_offset in wav_off]
-        code_frames = round(wav_frames * rate)
+        code_offsets = [round(wav_offset * rate) for wav_offset in f0_off]
+        code_frames = round(f0_frames * rate)
         remaining_code_frames = [
             length - offset for length, offset in zip(code_lengths, code_offsets)
         ]
@@ -93,12 +96,14 @@ class AcousticUnitsDataset(Dataset):
             code = code[code_offset : code_offset + code_frames]
             collated_codes.append(code)
 
-        wavs = torch.stack(wav_col, dim=0)
+        # wavs = torch.stack(wav_col, dim=0)
         codes = torch.stack(collated_codes, dim=0)
         phons = torch.stack(phon_col, dim=0)
         f0 = torch.stack(f0_col, dim=0)
 
-        return wavs, codes, phons, f0
+        f0_phon = torch.cat([f0, phons], dim=1)
+
+        return f0_phon, codes
     
     def modify_offsets(self, batch, lengths):
         frames = min(self.max_samples, *lengths)

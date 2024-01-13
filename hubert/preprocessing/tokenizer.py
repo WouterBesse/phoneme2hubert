@@ -27,6 +27,7 @@ class SequenceTokenizer:
           end_token (str): Special end of sequence token.
         """
 
+        
         self.languages = languages
         self.lowercase = lowercase
         self.char_repeats = char_repeats
