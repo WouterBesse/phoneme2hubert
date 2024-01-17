@@ -145,7 +145,7 @@ class HubertDiscrete(Hubert):
 
 
 class FeatureExtractor(nn.Module):
-    def __init__(self, hidden_units: int = 512, kernel_sizes: list[int] = [3, 3, 3, 3, 2, 2]):
+    def __init__(self, hidden_units: int = 512, kernel_sizes: list = [3, 3, 3, 3, 2, 2]):
         super().__init__()
         self.conv0 = nn.Conv1d(2, 512, 10, 5, bias=False)
         self.norm0 = nn.GroupNorm(512, 512)

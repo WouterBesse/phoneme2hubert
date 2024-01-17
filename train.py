@@ -14,6 +14,7 @@ from torch.utils.data.distributed import DistributedSampler
 # import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
+from tqdm import trange, tqdm
 
 from hubert.model import Hubert #, URLS
 from hubert.dataset import AcousticUnitsDataset
@@ -35,18 +36,18 @@ MAX_NORM = 10
 STEPS = 25000
 LOG_INTERVAL = 5
 VALIDATION_INTERVAL = 1000
-CHECKPOINT_INTERVAL = 5000
+CHECKPOINT_INTERVAL = 2
 BACKEND = "nccl"
 INIT_METHOD = "tcp://localhost:54321"
 
 
 def train(rank, world_size, args):
-    dist.init_process_group(
-        BACKEND,
-        rank=rank,
-        world_size=world_size,
-        init_method=INIT_METHOD,
-    )
+    # dist.init_process_group(
+    #     BACKEND,
+    #     rank=rank,
+    #     world_size=world_size,
+    #     init_method=INIT_METHOD,
+    # )
 
     ####################################################################################
     # Setup logging utilities:
@@ -55,19 +56,19 @@ def train(rank, world_size, args):
     log_dir = args.checkpoint_dir / "logs"
     log_dir.mkdir(exist_ok=True, parents=True)
 
-    if rank == 0:
-        logger.setLevel(logging.INFO)
-        handler = logging.FileHandler(log_dir / f"{args.checkpoint_dir.stem}.log")
-        handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(message)s", datefmt="%m/%d/%Y %I:%M:%S"
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-    else:
-        logger.setLevel(logging.ERROR)
+    # if rank == 'cuda':
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(log_dir / f"{args.checkpoint_dir.stem}.log")
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%m/%d/%Y %I:%M:%S"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    # else:
+    #     logger.setLevel(logging.ERROR)
 
-    writer = SummaryWriter(log_dir) if rank == 0 else None
+    writer = SummaryWriter()# if rank == 'cuda' else None
 
     ####################################################################################
     # Initialize models
@@ -88,8 +89,8 @@ def train(rank, world_size, args):
 
         hubert.load_state_dict(checkpoint["hubert"], strict=False)
 
-    hubert = DDP(hubert, device_ids=[rank])
-    # hubert = hubert.to(rank)
+    # hubert = DDP(hubert, device_ids=[rank])
+    hubert = hubert.to(rank)
     # Print amount of vram that's used in GB:
     print("Memory used after model initialisation: ", torch.cuda.memory_allocated() / 1e9)
 
@@ -114,16 +115,16 @@ def train(rank, world_size, args):
         root=args.dataset_dir,
         train=True,
     )
-    train_sampler = DistributedSampler(train_dataset, drop_last=True)
+    # train_sampler = DistributedSampler(train_dataset, drop_last=True)
     train_loader = DataLoader(
         train_dataset,
         collate_fn=train_dataset.collate,
         batch_size=BATCH_SIZE,
-        sampler=train_sampler,
+        # sampler=train_sampler,
         num_workers=8,
         pin_memory=True,
         shuffle=False,
-        drop_last=True,
+        # drop_last=True,
     )
 
     validation_dataset = AcousticUnitsDataset(
@@ -175,6 +176,16 @@ def train(rank, world_size, args):
     logger.info(f"started at epoch: {start_epoch}")
     logger.info("**" * 40 + "\n")
 
+    average_masked_loss = Metric()
+    average_unmasked_loss = Metric()
+    average_masked_accuracy = Metric()
+    average_unmasked_accuracy = Metric()
+
+    epoch_masked_loss = Metric()
+    epoch_unmasked_loss = Metric()
+    epoch_masked_accuracy = Metric()
+    epoch_unmasked_accuracy = Metric()
+
     if args.mask:
         average_masked_loss = Metric()
         average_unmasked_loss = Metric()
@@ -195,7 +206,7 @@ def train(rank, world_size, args):
     validation_loss = Metric()
     validation_accuracy = Metric()
 
-    for epoch in range(start_epoch, n_epochs + 1):
+    for epoch in trange(start_epoch, n_epochs + 1, desc="epochs"):
         # train_sampler.set_epoch(epoch)
 
         hubert.train()
@@ -208,9 +219,10 @@ def train(rank, world_size, args):
             epoch_loss.reset()
             epoch_accuracy.reset()
 
-        for wavs, codes in train_loader:
+        for wavs, codes in tqdm(train_loader, desc="training batches"):
             global_step += 1
             wavs, codes = wavs.to(rank), codes.to(rank)
+            
 
             ############################################################################
             # Compute training loss
@@ -226,10 +238,17 @@ def train(rank, world_size, args):
                 )
                 logits = logits[:, :length, :]
                 codes = codes[:, :length]
+                
+                
                 if args.mask:
                     mask = mask[:, :length]
+                
 
                 if args.mask:
+                    # print("Codes size: ", codes.size())
+                    # print("Logits size: ", logits.size())
+                    # print("Mask size: ", mask.size())
+                    # print("Masked size: ", codes[mask].size())
                     masked_loss = F.cross_entropy(logits[mask], codes[mask])
                     unmasked_loss = F.cross_entropy(logits[~mask], codes[~mask])
                     loss = args.alpha * masked_loss + (1 - args.alpha) * unmasked_loss
@@ -257,6 +276,7 @@ def train(rank, world_size, args):
             ############################################################################
             # Update and log training metrics
             ############################################################################
+            
 
             if args.mask:
                 average_masked_loss.update(masked_loss.item())
@@ -275,7 +295,7 @@ def train(rank, world_size, args):
                 epoch_loss.update(loss.item())
                 epoch_accuracy.update(accuracy.item())
 
-            if rank == 0 and global_step % LOG_INTERVAL == 0:
+            if rank == 'cuda': #global_step % LOG_INTERVAL == 0: #and # rank == 'cuda':
                 if args.mask:
                     writer.add_scalar(
                         "train/masked_loss",
@@ -319,7 +339,7 @@ def train(rank, world_size, args):
             # Start validation loop
             # --------------------------------------------------------------------------#
 
-            if global_step % VALIDATION_INTERVAL == 0:
+            if global_step % len(train_loader) == 0:
                 hubert.eval()
                 validation_loss.reset()
                 validation_accuracy.reset()
@@ -348,19 +368,19 @@ def train(rank, world_size, args):
                 # Log validation metrics
                 ############################################################################
 
-                if rank == 0:
-                    writer.add_scalar(
-                        "validation/unit_loss",
-                        validation_loss.value,
-                        global_step,
-                    )
-                    writer.add_scalar(
-                        "validation/unit_accuracy",
-                        validation_accuracy.value * 100,
-                        global_step,
-                    )
-                    logger.info(
-                        f"valid -- epoch: {epoch}, loss: {validation_loss.value:.4f}, accuracy: {validation_accuracy.value * 100:.2f}"
+                # if rank == 'cuda':
+                writer.add_scalar(
+                    "validation/unit_loss",
+                    validation_loss.value,
+                    global_step,
+                )
+                writer.add_scalar(
+                    "validation/unit_accuracy",
+                    validation_accuracy.value * 100,
+                    global_step,
+                )
+                logger.info(
+                    f"valid -- epoch: {epoch}, loss: {validation_loss.value:.4f}, accuracy: {validation_accuracy.value * 100:.2f}"
                     )
 
                 ############################################################################
@@ -373,17 +393,17 @@ def train(rank, world_size, args):
                         logger.info("-------- new best model found!")
                         best_loss = validation_loss.value
 
-                    if rank == 0:
-                        save_checkpoint(
-                            checkpoint_dir=args.checkpoint_dir,
-                            hubert=hubert,
-                            optimizer=optimizer,
-                            scaler=scaler,
-                            step=global_step,
-                            loss=validation_loss.value,
-                            best=new_best,
-                            logger=logger,
-                        )
+                    # if rank == 'cuda':
+                    save_checkpoint(
+                        checkpoint_dir=args.checkpoint_dir,
+                        hubert=hubert,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        step=global_step,
+                        loss=validation_loss.value,
+                        best=new_best,
+                        logger=logger,
+                    )
 
             # -----------------------------------------------------------------------------#
             # End validation loop
@@ -394,7 +414,7 @@ def train(rank, world_size, args):
         ####################################################################################
 
         logger.info(
-            f"""
+            f"""\n
             train -- epoch: {epoch}, masked loss: {epoch_masked_loss.value:.4f}, unmasked loss: {epoch_unmasked_loss.value:.4f}, 
                      masked accuracy: {epoch_masked_accuracy.value * 100:.2f}, umasked accuracy: {epoch_unmasked_accuracy.value * 100:.2f}
             """
@@ -432,6 +452,12 @@ if __name__ == "__main__":
         type=Path,
     )
     parser.add_argument(
+        "device",
+        metavar="device",
+        help="device to use for training.",
+        type=str,
+    )
+    parser.add_argument(
         "--resume",
         help="path to the checkpoint to resume from.",
         type=Path,
@@ -455,10 +481,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     world_size = torch.cuda.device_count()
-    # train('cpu', world_size, args)
-    mp.spawn(
-        train,
-        args=(world_size, args),
-        nprocs=world_size,
-        join=True,
-    )
+    train(args.device, world_size, args)
+    # mp.spawn(
+    #     train,
+    #     args=(world_size, args),
+    #     nprocs=world_size,
+    #     join=True,
+    # )
