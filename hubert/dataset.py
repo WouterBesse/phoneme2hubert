@@ -30,7 +30,7 @@ class AcousticUnitsDataset(Dataset):
 
         pattern = "train/*.npy" if train else "dev/*.npy"
 
-        pattern = "*.npy"
+        # pattern = "*.npy"
         metadata = (
             (path, path.relative_to(self.phon_dir).with_suffix("").as_posix())
             for path in self.phon_dir.rglob(pattern)
@@ -55,30 +55,31 @@ class AcousticUnitsDataset(Dataset):
         phon_path = self.phon_dir / f0_path.relative_to(self.phon_dir)
         
         codes = np.load(units_path)
-        phon = torch.from_numpy(np.array(np.load(phon_path)))
-        f0 = torch.from_numpy(np.array(np.load(f0_path))).float()
+        phon = torch.from_numpy(np.array(np.load(phon_path))).unsqueeze(0)
+        f0 = torch.from_numpy(np.array(np.load(f0_path))).float().unsqueeze(0)
+        # print(f0.size())
+        f0_phon = torch.cat([f0, phon], dim=0)
 
         # wav = F.pad(wav, ((400 - 320) // 2, (400 - 320) // 2))
         phon = F.pad(phon, ((400 - 320) // 2, (400 - 320) // 2))
         f0 = F.pad(f0, ((400 - 320) // 2, (400 - 320) // 2))
 
-        return torch.from_numpy(codes), phon.unsqueeze(0), f0.unsqueeze(0)
+        return torch.from_numpy(codes), f0_phon
 
     def collate(self, batch):
-        codes, phons, f0 = zip(*batch)
-        codes, phons, f0 = list(codes), list(phons), list(f0)
+        codes, f0_phons = zip(*batch)
+        codes, f0_phons = list(codes), list(f0_phons)
 
         code_lengths = [code.size(-1) for code in codes]
-        phons_lengths = [phon.size(-1) for phon in phons]
-        f0_lengths = [f.size(-1) for f in f0]
+        f0_phons_lengths = [f0_phon.size(-1) for f0_phon in f0_phons]
 
-        phon_frames, phon_col, phon_off = self.modify_offsets(phons, phons_lengths)
-        f0_frames, f0_col, f0_off = self.modify_offsets(f0, f0_lengths)
+        f0_phon_frames, f0_phon_col, f0_phon_off = self.modify_offsets(f0_phons, f0_phons_lengths)
+        # f0_frames, f0_col, f0_off = self.modify_offsets(f0, f0_lengths)
 
         rate = self.label_rate / self.sample_rate
 
-        code_offsets = [round(wav_offset * rate) for wav_offset in f0_off]
-        code_frames = round(f0_frames * rate)
+        code_offsets = [round(wav_offset * rate) for wav_offset in f0_phon_off]
+        code_frames = round(f0_phon_frames * rate)
 
         remaining_code_frames = [
             length - offset for length, offset in zip(code_lengths, code_offsets)
@@ -91,12 +92,12 @@ class AcousticUnitsDataset(Dataset):
             collated_codes.append(code)
 
         codes = torch.stack(collated_codes, dim=0)
-        phons = torch.stack(phon_col, dim=0)
-        f0 = torch.stack(f0_col, dim=0)
+        f0_phons = torch.stack(f0_phon_col, dim=0)
+        # f0 = torch.stack(f0_col, dim=0)
 
-        f0_phon = torch.cat([f0, phons], dim=1)
+        # f0_phon = torch.cat([f0, phons], dim=1)
 
-        return f0_phon, codes
+        return f0_phons, codes
     
     def modify_offsets(self, batch, lengths):
         frames = min(self.max_samples, *lengths)

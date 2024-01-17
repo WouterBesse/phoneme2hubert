@@ -35,7 +35,7 @@ WEIGHT_DECAY = 1e-2
 MAX_NORM = 10
 STEPS = 25000
 LOG_INTERVAL = 5
-VALIDATION_INTERVAL = 1000
+VALIDATION_INTERVAL = 1
 CHECKPOINT_INTERVAL = 2
 BACKEND = "nccl"
 INIT_METHOD = "tcp://localhost:54321"
@@ -343,8 +343,8 @@ def train(rank, world_size, args):
                 hubert.eval()
                 validation_loss.reset()
                 validation_accuracy.reset()
-                for wavs, codes in validation_loader:
-                    wavs, codes = wavs.to(rank), codes.to(rank)
+                for items in validation_loader:
+                    wavs, codes = items[0].to(rank), items[1].to(rank)
 
                     with torch.no_grad():
                         logits, _ = hubert(wavs)
