@@ -355,7 +355,7 @@ def train(rank, world_size, args):
                 hubert.eval()
                 validation_loss.reset()
                 validation_accuracy.reset()
-                for items in validation_loader:
+                for items in tqdm(validation_loader, desc="validation batches"):
                     wavs, codes = items[0].to(rank), items[1].to(rank)
 
                     with torch.no_grad():

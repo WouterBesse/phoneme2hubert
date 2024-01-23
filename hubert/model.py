@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 
 class Hubert(nn.Module):
-    def __init__(self, num_label_embeddings: int = 100, mask: bool = True):
+    def __init__(self, num_label_embeddings: int = 100, mask: bool = True, downsamples: int = 4):
         """
         Initializes the Hubert model.
 
@@ -33,6 +33,18 @@ class Hubert(nn.Module):
             12,
         )
         self.proj = nn.Linear(768, 256)
+
+        self.upconvs = nn.ModuleList([
+            nn.ConvTranspose1d(256, 256, kernel_size=2, stride=2, bias=False) for _ in range(downsamples)
+        ])
+
+        self.maskupscale = nn.ModuleList([
+            nn.ConvTranspose1d(2, 2, kernel_size=2, stride=2, bias=False) for _ in range(downsamples)
+        ])
+
+        self.downconvs = nn.ModuleList([
+            nn.Conv1d(2, 2, kernel_size=2, stride=2, bias=False) for _ in range(downsamples)
+        ])
 
         self.masked_spec_embed = nn.Parameter(torch.FloatTensor(768).uniform_())
         self.label_embedding = nn.Embedding(num_label_embeddings, 256)
@@ -94,9 +106,22 @@ class Hubert(nn.Module):
         return logits / 0.1
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        for downconv in self.downconvs:
+            x = downconv(x)
         x, mask = self.encode(x)
         x = self.proj(x)
+
+        x = x.transpose(1, 2)
+        for upconv in self.upconvs:
+            x = upconv(x)
+        x = x.transpose(1, 2)
+
+        # for maskup in self.maskupscale:
+        #     mask = maskup(mask)
+
         logits = self.logits(x)
+
         return logits, mask
 
 
