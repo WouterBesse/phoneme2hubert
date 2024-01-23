@@ -19,7 +19,7 @@ def encode_dataset(args):
 
     print(f"Encoding dataset at {args.in_dir}")
     for in_path in tqdm(list(args.in_dir.rglob(f"*{args.extension}"))):
-        wav, sr = torchaudio.load(in_path)
+        wav, sr = torchaudio.load(in_path.__str__())
         wav = resample(wav, sr, 16000)
         wav = wav.unsqueeze(0).cuda()
 
