@@ -16,7 +16,7 @@ class AcousticUnitsDataset(Dataset):
         sample_rate: int = 16000,
         label_rate: int = 50,
         min_samples: int = 32000,
-        max_samples: int = 250000,
+        max_samples: int = 50000,
         train: bool = True,
     ):
         self.wavs_dir = root / "wav"
